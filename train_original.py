@@ -21,7 +21,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-import test # import test.py to get mAP after each epoch
+import test  # import test.py to get mAP after each epoch
 from models.experimental import attempt_load
 #from models.yolo import Model
 from models.yolo_test import Model
@@ -40,19 +40,6 @@ logger = logging.getLogger(__name__)
 
 from utils.datasets import RandomSampler
 import global_var
-
-
-#def seed_torch(seed=10):
-#    seed=0
-#    # torch.backends.cudnn.enabled = True  # pytorch 使用CUDANN 加速，即使用GPU加速
-#    torch.backends.cudnn.benchmark = False  # cuDNN使用的非确定性算法自动寻找最适合当前配置的高效算法，设置为False 则每次的算法一致
-#    torch.backends.cudnn.deterministic = True  # 设置每次返回的卷积算法是一致的
-#    torch.manual_seed(seed)  # 为当前CPU 设置随机种子
-#    torch.cuda.manual_seed(seed)  # 为当前的GPU 设置随机种子
-#    torch.cuda.manual_seed_all(seed)  # 当使用多块GPU 时，均设置随机种子
-#    np.random.seed(seed)
-#    random.seed(seed)
-#    os.environ['PYTHONHASHSEED'] = str(seed)
 
 
 def train(hyp, opt, device, tb_writer=None):
@@ -145,13 +132,13 @@ def train(hyp, opt, device, tb_writer=None):
 
     if opt.adam:
         #optimizer = optim.Adam(pg0, lr=hyp['lr0'], betas=(hyp['momentum'], 0.999))  # adjust beta1 to momentum
-        #optimizer = optim.SGD(pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True,weight_decay=hyp['weight_decay'])
         optimizer = optim.SGD(pg0, lr=1e-2,momentum=0.937,nesterov=True,weight_decay=0.0005)
+        #optimizer = optim.SGD(pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True)
         #optimizer = optim.AdamW(pg0, lr=hyp['lr0'], betas=(hyp['momentum'], 0.999), weight_decay=hyp['weight_decay']) 
 
     else:
         #optimizer = optim.Adam(pg0, lr=hyp['lr0'], betas=(hyp['momentum'], 0.999))  # adjust beta1 to momentum
-        #optimizer = optim.SGD(pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True,weight_decay=hyp['weight_decay'])
+        #optimizer = optim.SGD(pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True)
         optimizer = optim.SGD(pg0, lr=1e-2,momentum=0.937,nesterov=True,weight_decay=0.0005)
         #optimizer = optim.AdamW(pg0, lr=hyp['lr0'], betas=(hyp['momentum'], 0.999))  
 
@@ -245,7 +232,6 @@ def train(hyp, opt, device, tb_writer=None):
             if not opt.noautoanchor:
                 check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)
             model.half().float()  # pre-reduce anchor precision
-
 
     # DDP mode
     if cuda and rank != -1:
@@ -523,11 +509,11 @@ def train(hyp, opt, device, tb_writer=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='yolov5l.pt', help='initial weights path')
-    parser.add_argument('--cfg', type=str, default='models/transformer/lora.yaml', help='model.yaml path')
+    parser.add_argument('--cfg', type=str, default='lora.yaml', help='model.yaml path')
     parser.add_argument('--data', type=str, default='data/multispectral/LLVIP.yaml', help='data.yaml path')
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=200)
-    parser.add_argument('--batch-size', type=int, default=8, help='total batch size for all GPUs')
+    parser.add_argument('--batch-size', type=int, default=1, help='total batch size for all GPUs')
     parser.add_argument('--img-size', nargs='+', type=int, default=[640, 640], help='[train, test] image sizes')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
@@ -547,7 +533,7 @@ if __name__ == '__main__':
     parser.add_argument('--workers', type=int, default=8, help='maximum number of dataloader workers')
     parser.add_argument('--project', default='runs/train', help='save to project/name')
     parser.add_argument('--entity', default=None, help='W&B entity')
-    parser.add_argument('--name', default='lora1-r1-', help='save to project/name')
+    parser.add_argument('--name', default='test', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
     parser.add_argument('--linear-lr', action='store_true', help='linear LR')

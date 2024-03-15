@@ -37,7 +37,7 @@ def test(data,
          plots=True,
          wandb_logger=None,
          compute_loss=None,
-         half_precision=True,
+         half_precision=False,
          is_coco=False,
          opt=None):
     # Initialize/load model and set device
@@ -65,7 +65,7 @@ def test(data,
     # Half
     half = device.type != 'cpu' and half_precision  # half precision only supported on CUDA
     if half:
-        model.half()
+        model
 
     # Configure
     model.eval()
@@ -105,7 +105,7 @@ def test(data,
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
         img = img.to(device, non_blocking=True)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
+        img = img if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         targets = targets.to(device)
         nb, _, height, width = img.shape  # batch size, channels, height, width
@@ -297,7 +297,7 @@ def test(data,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
-    parser.add_argument('--weights', nargs='+', type=str, default='runs/train/lora0-/weights/best.pt', help='model.pt path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default='runs/train/c3slora0-2/weights/best.pt', help='model.pt path(s)')
     parser.add_argument('--data', type=str, default='data/multispectral/LLVIP.yaml', help='*.data path')
     parser.add_argument('--batch-size', type=int, default=64, help='size of each image batch')
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
@@ -322,7 +322,7 @@ if __name__ == '__main__':
     #check_requirements()
 
     if opt.task in ('train', 'val', 'test'):  # run normally
-        test(opt.data,
+        test_full(opt.data,
              opt.weights,
              opt.batch_size,
              opt.img_size,
@@ -340,7 +340,7 @@ if __name__ == '__main__':
 
     elif opt.task == 'speed':  # speed benchmarks
         for w in opt.weights:
-            test(opt.data, w, opt.batch_size, opt.img_size, 0.25, 0.45, save_json=False, plots=False)
+            test_full(opt.data, w, opt.batch_size, opt.img_size, 0.25, 0.45, save_json=False, plots=False)
 
     elif opt.task == 'study':  # run over a range of settings and save/plot
         # python test.py --task study --data coco.yaml --iou 0.7 --weights yolov5s.pt yolov5m.pt yolov5l.pt yolov5x.pt
@@ -350,7 +350,7 @@ if __name__ == '__main__':
             y = []  # y axis
             for i in x:  # img-size
                 print(f'\nRunning {f} point {i}...')
-                r, _, t = test(opt.data, w, opt.batch_size, i, opt.conf_thres, opt.iou_thres, opt.save_json,
+                r, _, t = test_full(opt.data, w, opt.batch_size, i, opt.conf_thres, opt.iou_thres, opt.save_json,
                                plots=False)
                 y.append(r + t)  # results and times
             np.savetxt(f, y, fmt='%10.4g')  # save
