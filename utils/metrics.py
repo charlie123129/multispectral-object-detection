@@ -10,9 +10,9 @@ from . import general
 
 
 def fitness(x):
-    # Model fitness as a weighted combination of metrics
-    w = [0.0, 0.0, 0.1, 0.9]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
-    return (x[:, :4] * w).sum(1)
+    # 更新权重以包含mAP@0.75
+    w = [0.0, 0.0, 0.2, 0.4, 0.4]  # 权重更新为[P, R, mAP@0.5, mAP@0.75, mAP@0.5:0.95]
+    return (x[:, :5] * w).sum(1)  # 确保x包含5个指标
 
 
 def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir='.', names=()):
@@ -75,8 +75,6 @@ def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir='.', names
         plot_mc_curve(px, r, Path(save_dir) / 'R_curve.png', names, ylabel='Recall')
 
     i = f1.mean(0).argmax()  # max F1 index
-    # print("p[:, i]", p[:, i])
-    # print("p[:, i]", p[:, i].shape())
     return p[:, i], r[:, i], ap, f1[:, i], unique_classes.astype('int32')
 
 
@@ -147,7 +145,7 @@ class ConfusionMatrix:
         for i, gc in enumerate(gt_classes):
             j = m0 == i
             if n and sum(j) == 1:
-                self.matrix[detection_classes[m1[j]], gc] += 1  # correct
+                self.matrix[gc, detection_classes[m1[j]]] += 1  # correct
             else:
                 self.matrix[self.nc, gc] += 1  # background FP
 

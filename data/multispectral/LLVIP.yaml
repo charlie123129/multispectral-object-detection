@@ -8,17 +8,21 @@
 
 # train and val data as 1) directory: path/images/, 2) file: path/images.txt, or 3) list: [path1/images/, path2/images/]
 
-train_rgb: /raid/M11107315/LLVIP_all/visible/train
-val_rgb: /raid/M11107315/LLVIP_all/visible/valid
-test_rgb: /raid/M11107315/LLVIP_all/visible/test
-#test_rgb: /raid/M11107315/LLVIP_all/infrared/test
+#train: /home/sherry/charlie/LLVIP_all/visible/train
+#val: /home/sherry/charlie/LLVIP_all/visible/test
+#test: /home/sherry/charlie/LLVIP_all/visible/test
+train: /home/sherry/charlie/LLVIP_all/infrared/train
+val: /home/sherry/charlie/LLVIP_all/infrared/test
+test: /home/sherry/charlie/LLVIP_all/infrared/test
 
 
-train_ir: /raid/M11107315/LLVIP_all/infrared/train
-val_ir: /raid/M11107315/LLVIP_all/infrared/valid
-#test_ir: /raid/M11107315/LLVIP_all/infrared/test
-test_ir: /raid/M11107315/LLVIP_all/visible/test
+train_rgb: /home/sherry/charlie/LLVIP_all/visible/train
+val_rgb: /home/sherry/charlie/LLVIP_all/visible/test
+test_rgb: /home/sherry/charlie/LLVIP_all/visible/test
 
+train_ir: /home/sherry/charlie/LLVIP_all/infrared/train
+val_ir: /home/sherry/charlie/LLVIP_all/infrared/test
+test_ir: /home/sherry/charlie/LLVIP_all/infrared/test
 
 
 # number of classes

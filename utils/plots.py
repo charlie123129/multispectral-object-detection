@@ -25,7 +25,6 @@ from utils.metrics import fitness
 matplotlib.rc('font', **{'size': 11})
 matplotlib.use('Agg')  # for writing to files only
 
-
 class Colors:
     # Ultralytics color palette https://ultralytics.com/
     def __init__(self):
@@ -39,9 +38,15 @@ class Colors:
     @staticmethod
     def hex2rgb(h):  # rgb order (PIL)
         return tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
+    
+colors = Colors() 
 
+def color_list():
+    # Return first 10 plt colors as (r,g,b) https://stackoverflow.com/questions/51350872/python-from-color-name-to-rgb
+    def hex2rgb(h):
+        return tuple(int(h[1 + i:1 + i + 2], 16) for i in (0, 2, 4))
 
-colors = Colors()  # create instance for 'from utils.plots import colors'
+    return [hex2rgb(h) for h in matplotlib.colors.TABLEAU_COLORS.values()]  # or BASE_ (8), CSS4_ (148), XKCD_ (949)
 
 
 def hist2d(x, y, n=100):
@@ -64,36 +69,32 @@ def butter_lowpass_filtfilt(data, cutoff=1500, fs=50000, order=5):
     return filtfilt(b, a, data)  # forward-backward filter
 
 
-def plot_one_box(x, im, color=None, label=None, line_thickness=3):
-    # Plots one bounding box on image 'im' using OpenCV
-    assert im.data.contiguous, 'Image not contiguous. Apply np.ascontiguousarray(im) to plot_on_box() input image.'
-    tl = line_thickness or round(0.002 * (im.shape[0] + im.shape[1]) / 2) + 1  # line/font thickness
-    # print(tl)
+def plot_one_box(x, img, color=None, label=None, line_thickness=3):
+    # Plots one bounding box on image img
+    tl = line_thickness or round(0.002 * (img.shape[0] + img.shape[1]) / 2) + 1  # line/font thickness
     color = color or [random.randint(0, 255) for _ in range(3)]
     c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
-    # print(c1, c2)
-    cv2.rectangle(im, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
+    cv2.rectangle(img, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
     if label:
         tf = max(tl - 1, 1)  # font thickness
         t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
         c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
-        cv2.rectangle(im, c1, c2, color, -1, cv2.LINE_AA)  # filled
-        cv2.putText(im, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
+        cv2.rectangle(img, c1, c2, color, -1, cv2.LINE_AA)  # filled
+        cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
 
-def plot_one_box_PIL(box, im, color=None, label=None, line_thickness=None):
-    # Plots one bounding box on image 'im' using PIL
-    im = Image.fromarray(im)
-    draw = ImageDraw.Draw(im)
-    line_thickness = line_thickness or max(int(min(im.size) / 200), 2)
+def plot_one_box_PIL(box, img, color=None, label=None, line_thickness=None):
+    img = Image.fromarray(img)
+    draw = ImageDraw.Draw(img)
+    line_thickness = line_thickness or max(int(min(img.size) / 200), 2)
     draw.rectangle(box, width=line_thickness, outline=tuple(color))  # plot
     if label:
-        fontsize = max(round(max(im.size) / 40), 12)
+        fontsize = max(round(max(img.size) / 40), 12)
         font = ImageFont.truetype("Arial.ttf", fontsize)
         txt_width, txt_height = font.getsize(label)
         draw.rectangle([box[0], box[1] - txt_height + 4, box[0] + txt_width, box[1]], fill=tuple(color))
         draw.text((box[0], box[1] - txt_height + 1), label, fill=(255, 255, 255), font=font)
-    return np.asarray(im)
+    return np.asarray(img)
 
 
 def plot_wh_methods():  # from utils.plots import *; plot_wh_methods()
@@ -149,6 +150,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
         h = math.ceil(scale_factor * h)
         w = math.ceil(scale_factor * w)
 
+    colors = color_list()  # list of colors
     mosaic = np.full((int(ns * h), int(ns * w), 3), 255, dtype=np.uint8)  # init
     for i, img in enumerate(images):
         if i == max_subplots:  # if last batch has fewer images than we expect
@@ -160,9 +162,8 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
         img = img.transpose(1, 2, 0)
         if scale_factor < 1:
             img = cv2.resize(img, (w, h))
-
+            
         img = img[:, :, :3]
-
 
         mosaic[block_y:block_y + h, block_x:block_x + w, :] = img
         if len(targets) > 0:
@@ -182,7 +183,7 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
             boxes[[1, 3]] += block_y
             for j, box in enumerate(boxes.T):
                 cls = int(classes[j])
-                color = colors(cls)
+                color = colors[cls % len(colors)]
                 cls = names[cls] if names else cls
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
                     label = '%s' % cls if labels else '%s %.1f' % (cls, conf[j])
@@ -290,6 +291,7 @@ def plot_labels(labels, names=(), save_dir=Path(''), loggers=None):
     print('Plotting labels... ')
     c, b = labels[:, 0], labels[:, 1:].transpose()  # classes, boxes
     nc = int(c.max() + 1)  # number of classes
+    colors = color_list()
     x = pd.DataFrame(b.transpose(), columns=['x', 'y', 'width', 'height'])
 
     # seaborn correlogram
@@ -315,7 +317,7 @@ def plot_labels(labels, names=(), save_dir=Path(''), loggers=None):
     labels[:, 1:] = xywh2xyxy(labels[:, 1:]) * 2000
     img = Image.fromarray(np.ones((2000, 2000, 3), dtype=np.uint8) * 255)
     for cls, *box in labels[:1000]:
-        ImageDraw.Draw(img).rectangle(box, width=1, outline=colors(cls))  # plot
+        ImageDraw.Draw(img).rectangle(box, width=1, outline=colors[int(cls) % 10])  # plot
     ax[1].imshow(img)
     ax[1].axis('off')
 
@@ -336,7 +338,7 @@ def plot_labels(labels, names=(), save_dir=Path(''), loggers=None):
 def plot_evolution(yaml_file='data/hyp.finetune.yaml'):  # from utils.plots import *; plot_evolution()
     # Plot hyperparameter evolution results in evolve.txt
     with open(yaml_file) as f:
-        hyp = yaml.safe_load(f)
+        hyp = yaml.load(f, Loader=yaml.SafeLoader)
     x = np.loadtxt('evolve.txt', ndmin=2)
     f = fitness(x)
     # weights = (f - f.min()) ** 2  # for weighted results

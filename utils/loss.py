@@ -1,8 +1,5 @@
 # Loss functions
 
-
-
-
 import torch
 import torch.nn as nn
 
@@ -212,9 +209,7 @@ class ComputeLoss:
             # Append
             a = t[:, 6].long()  # anchor indices
             #indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
-            #indices.append((b, a, gj.clamp_(0, gain[3] - 1).long(), gi.clamp_(0, gain[2] - 1).long()))  # image, anchor, grid indices
             indices.append((b, a, gj.clamp(0, int(gain[3]) - 1).long(), gi.clamp(0, int(gain[2]) - 1).long()))  # image, anchor, grid indices
-
 
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
             anch.append(anchors[a])  # anchors

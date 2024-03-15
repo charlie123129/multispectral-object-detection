@@ -55,7 +55,7 @@ def check_wandb_resume(opt):
 
 def process_wandb_config_ddp_mode(opt):
     with open(opt.data) as f:
-        data_dict = yaml.safe_load(f)  # data dict
+        data_dict = yaml.load(f, Loader=yaml.SafeLoader)  # data dict
     train_dir, val_dir = None, None
     if isinstance(data_dict['train'], str) and data_dict['train'].startswith(WANDB_ARTIFACT_PREFIX):
         api = wandb.Api()
@@ -73,7 +73,7 @@ def process_wandb_config_ddp_mode(opt):
     if train_dir or val_dir:
         ddp_data_path = str(Path(val_dir) / 'wandb_local_data.yaml')
         with open(ddp_data_path, 'w') as f:
-            yaml.safe_dump(data_dict, f)
+            yaml.dump(data_dict, f)
         opt.data = ddp_data_path
 
 
@@ -94,7 +94,7 @@ class WandbLogger():
         elif self.wandb:
             self.wandb_run = wandb.init(config=opt,
                                         resume="allow",
-                                        project='YOLOv5' if opt.project == 'runs/train' else Path(opt.project).stem,
+                                        project='YOLOv5-multi' if opt.project == 'runs/train' else Path(opt.project).stem,
                                         name=name,
                                         job_type=job_type,
                                         id=run_id) if not wandb.run else wandb.run
@@ -117,10 +117,10 @@ class WandbLogger():
         check_dataset(self.data_dict)
         config_path = self.log_dataset_artifact(opt.data,
                                                 opt.single_cls,
-                                                'YOLOv5' if opt.project == 'runs/train' else Path(opt.project).stem)
+                                                'YOLOv5-multi' if opt.project == 'runs/train' else Path(opt.project).stem)
         print("Created dataset config file ", config_path)
         with open(config_path) as f:
-            wandb_data_dict = yaml.safe_load(f)
+            wandb_data_dict = yaml.load(f, Loader=yaml.SafeLoader)
         return wandb_data_dict
 
     def setup_training(self, opt, data_dict):
@@ -192,7 +192,7 @@ class WandbLogger():
 
     def log_dataset_artifact(self, data_file, single_cls, project, overwrite_config=False):
         with open(data_file) as f:
-            data = yaml.safe_load(f)  # data dict
+            data = yaml.load(f, Loader=yaml.SafeLoader)  # data dict
         nc, names = (1, ['item']) if single_cls else (int(data['nc']), data['names'])
         names = {k: v for k, v in enumerate(names)}  # to index dictionary
         self.train_artifact = self.create_dataset_table(LoadImagesAndLabels(
@@ -206,7 +206,7 @@ class WandbLogger():
         path = data_file if overwrite_config else '_wandb.'.join(data_file.rsplit('.', 1))  # updated data.yaml path
         data.pop('download', None)
         with open(path, 'w') as f:
-            yaml.safe_dump(data, f)
+            yaml.dump(data, f)
 
         if self.job_type == 'Training':  # builds correct artifact pipeline graph
             self.wandb_run.use_artifact(self.val_artifact)

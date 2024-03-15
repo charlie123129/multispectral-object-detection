@@ -59,47 +59,6 @@ def check_anchors(dataset, model, thr=4.0, imgsz=640):
     print('')  # newline
 
 
-def check_anchors_rgb_ir(dataset, model, thr=4.0, imgsz=640):
-    # Check anchor fit to data, recompute if necessary
-    prefix = colorstr('autoanchor: ')
-    print(f'\n{prefix}Analyzing anchors... ', end='')
-    # m = model.module.model[-1] if hasattr(model, 'module') else model.model[-1]  # Detect()
-    m = list(model.model.children())[-1]
-    print(m)
-    shapes = imgsz * dataset.shapes / dataset.shapes.max(1, keepdims=True)
-    scale = np.random.uniform(0.9, 1.1, size=(shapes.shape[0], 1))  # augment scale
-    wh = torch.tensor(np.concatenate([l[:, 3:5] * s for s, l in zip(shapes * scale, dataset.labels)])).float()  # wh
-
-    def metric(k):  # compute metric
-        r = wh[:, None] / k[None]
-        x = torch.min(r, 1. / r).min(2)[0]  # ratio metric
-        best = x.max(1)[0]  # best_x
-        aat = (x > 1. / thr).float().sum(1).mean()  # anchors above threshold
-        bpr = (best > 1. / thr).float().mean()  # best possible recall
-        return bpr, aat
-
-    anchors = m.anchor_grid.clone().cpu().view(-1, 2)  # current anchors
-    bpr, aat = metric(anchors)
-    print(f'anchors/target = {aat:.2f}, Best Possible Recall (BPR) = {bpr:.4f}', end='')
-    if bpr < 0.98:  # threshold to recompute
-        print('. Attempting to improve anchors, please wait...')
-        na = m.anchor_grid.numel() // 2  # number of anchors
-        try:
-            anchors = kmean_anchors(dataset, n=na, img_size=imgsz, thr=thr, gen=1000, verbose=False)
-        except Exception as e:
-            print(f'{prefix}ERROR: {e}')
-        new_bpr = metric(anchors)[0]
-        if new_bpr > bpr:  # replace anchors
-            anchors = torch.tensor(anchors, device=m.anchors.device).type_as(m.anchors)
-            m.anchor_grid[:] = anchors.clone().view_as(m.anchor_grid)  # for inference
-            m.anchors[:] = anchors.clone().view_as(m.anchors) / m.stride.to(m.anchors.device).view(-1, 1, 1)  # loss
-            check_anchor_order(m)
-            print(f'{prefix}New anchors saved to model. Update model *.yaml to use these anchors in the future.')
-        else:
-            print(f'{prefix}Original anchors better than new anchors. Proceeding with original anchors.')
-    print('')  # newline
-
-
 def kmean_anchors(path='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen=1000, verbose=True):
     """ Creates kmeans-evolved anchors from training dataset
 
@@ -143,7 +102,7 @@ def kmean_anchors(path='./data/coco128.yaml', n=9, img_size=640, thr=4.0, gen=10
 
     if isinstance(path, str):  # *.yaml file
         with open(path) as f:
-            data_dict = yaml.safe_load(f)  # model dict
+            data_dict = yaml.load(f, Loader=yaml.SafeLoader)  # model dict
         from utils.datasets import LoadImagesAndLabels
         dataset = LoadImagesAndLabels(data_dict['train'], augment=True, rect=True)
     else:

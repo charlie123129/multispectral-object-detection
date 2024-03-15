@@ -19,7 +19,7 @@ for last in path.rglob('*/**/last.pt'):
 
     # Load opt.yaml
     with open(last.parent.parent / 'opt.yaml') as f:
-        opt = yaml.safe_load(f)
+        opt = yaml.load(f, Loader=yaml.SafeLoader)
 
     # Get device count
     d = opt['device'].split(',')  # devices

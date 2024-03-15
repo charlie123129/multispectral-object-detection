@@ -23,8 +23,6 @@ from tqdm import tqdm
 from utils.general import check_requirements, xyxy2xywh, xywh2xyxy, xywhn2xyxy, xyn2xy, segment2box, segments2boxes, \
     resample_segments, clean_str
 from utils.torch_utils import torch_distributed_zero_first
-
-
 import global_var
 
 
@@ -33,7 +31,6 @@ help_url = 'https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data'
 img_formats = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo']  # acceptable image suffixes
 vid_formats = ['mov', 'avi', 'mp4', 'mpg', 'mpeg', 'm4v', 'wmv', 'mkv']  # acceptable video suffixes
 logger = logging.getLogger(__name__)
-
 
 
 # FQY 构建随机采样的sampler，为了之后双模态输入
@@ -101,8 +98,34 @@ def exif_size(img):
     return s
 
 
+def exif_transpose(image):
+    """
+    Transpose a PIL image accordingly if it has an EXIF Orientation tag.
+    Inplace version of https://github.com/python-pillow/Pillow/blob/master/src/PIL/ImageOps.py exif_transpose()
+
+    :param image: The image to transpose.
+    :return: An image.
+    """
+    exif = image.getexif()
+    orientation = exif.get(0x0112, 1)  # default 1
+    if orientation > 1:
+        method = {2: Image.FLIP_LEFT_RIGHT,
+                  3: Image.ROTATE_180,
+                  4: Image.FLIP_TOP_BOTTOM,
+                  5: Image.TRANSPOSE,
+                  6: Image.ROTATE_270,
+                  7: Image.TRANSVERSE,
+                  8: Image.ROTATE_90,
+                  }.get(orientation)
+        if method is not None:
+            image = image.transpose(method)
+            del exif[0x0112]
+            image.info["exif"] = exif.tobytes()
+    return image
+
+
 def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False,
-                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix='', sampler=None):
+                      rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix=''):
     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
     with torch_distributed_zero_first(rank):
         dataset = LoadImagesAndLabels(path, imgsz, batch_size,
@@ -120,13 +143,6 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
     nw = min([os.cpu_count() // world_size, batch_size if batch_size > 1 else 0, workers])  # number of workers
     sampler = torch.utils.data.distributed.DistributedSampler(dataset) if rank != -1 else None
     loader = torch.utils.data.DataLoader if image_weights else InfiniteDataLoader
-
-
-    # global_var.set_value('s', torch.randperm(len(dataset)).tolist())
-    # sampler = RandomSampler(dataset)
-
-    # sampler = torch.utils.data.sampler.RandomSampler(dataset)
-
     # Use torch.utils.data.DataLoader() if dataset.properties will update during training else InfiniteDataLoader()
     dataloader = loader(dataset,
                         batch_size=batch_size,
@@ -134,90 +150,7 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                         sampler=sampler,
                         pin_memory=True,
                         collate_fn=LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn)
-
     return dataloader, dataset
-
-
-# def create_dual_dataloader(path1, path2, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False,
-#                       rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix='', sampler=None):
-#     # Make sure only the first process in DDP process the dataset first, and the following others can use the cache
-#     with torch_distributed_zero_first(rank):
-#         dataset_modal1 = LoadImagesAndLabels(path1, imgsz, batch_size,
-#                                       augment=augment,  # augment images
-#                                       hyp=hyp,  # augmentation hyperparameters
-#                                       rect=rect,  # rectangular training
-#                                       cache_images=cache,
-#                                       single_cls=opt.single_cls,
-#                                       stride=int(stride),
-#                                       pad=pad,
-#                                       image_weights=image_weights,
-#                                       prefix=prefix)
-#         dataset_modal2 = LoadImagesAndLabels(path2, imgsz, batch_size,
-#                                       augment=augment,  # augment images
-#                                       hyp=hyp,  # augmentation hyperparameters
-#                                       rect=rect,  # rectangular training
-#                                       cache_images=cache,
-#                                       single_cls=opt.single_cls,
-#                                       stride=int(stride),
-#                                       pad=pad,
-#                                       image_weights=image_weights,
-#                                       prefix=prefix)
-#
-#         dataset_modal3 = LoadMultiModalImagesAndLabels(path1, path2, imgsz, batch_size,
-#                                       augment=augment,  # augment images
-#                                       hyp=hyp,  # augmentation hyperparameters
-#                                       rect=rect,  # rectangular training
-#                                       cache_images=cache,
-#                                       single_cls=opt.single_cls,
-#                                       stride=int(stride),
-#                                       pad=pad,
-#                                       image_weights=image_weights,
-#                                       prefix=prefix)
-#
-#     batch_size = min(batch_size, len(dataset_modal1))
-#     nw = min([os.cpu_count() // world_size, batch_size if batch_size > 1 else 0, workers])  # number of workers
-#     # sampler = torch.utils.data.distributed.DistributedSampler(dataset_modal1) if rank != -1 else None
-#
-#     global_var.set_value('s', torch.randperm(len(dataset_modal1)).tolist())
-#     # global_var.set_value('s', torch.randperm(len(dataset_modal1)).tolist())
-#     sampler = RandomSampler(dataset_modal1)
-#
-#     # sampler = torch.utils.data.sampler.RandomSampler(dataset_modal1)
-#     # sampler = torch.utils.data.sampler.SequentialSampler(dataset_modal1)
-#
-#     loader = torch.utils.data.DataLoader if image_weights else InfiniteDataLoader
-#
-#     print(path1, path2)
-#     # Use torch.utils.data.DataLoader() if dataset.properties will update during training else InfiniteDataLoader()
-#     dataloader_modal1 = loader(dataset_modal1,
-#                         batch_size=batch_size,
-#                         num_workers=nw,
-#                         sampler=sampler,
-#                         pin_memory=True,
-#                         collate_fn=LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn)
-#
-#
-#     print(list(sampler))
-#
-#     dataloader_modal2 = loader(dataset_modal2,
-#                         batch_size=batch_size,
-#                         num_workers=nw,
-#                         sampler=sampler,
-#                         pin_memory=True,
-#                         collate_fn=LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn)
-#
-#     print(list(sampler))
-#
-#     # print(" dataloader_modal1 ")
-#     # print(dataloader_modal1)
-#     # print(" dataloader_modal2 ")
-#     # print(dataloader_modal2)
-#     # print(" dataset_modal1 ")
-#     # print(type(dataset_modal1))
-#     # print(" dataset_modal2 ")
-#     # print(type(dataset_modal2))
-#
-#     return dataloader_modal1, dataset_modal1, dataloader_modal2, dataset_modal2
 
 
 def create_dataloader_rgb_ir(path1, path2,  imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False,
@@ -255,8 +188,6 @@ def create_dataloader_rgb_ir(path1, path2,  imgsz, batch_size, stride, opt, hyp=
                         collate_fn=LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn)
 
     return dataloader, dataset
-
-
 
 
 class InfiniteDataLoader(torch.utils.data.dataloader.DataLoader):
@@ -446,15 +377,15 @@ class LoadStreams:  # multiple IP or RTSP cameras
         n = len(sources)
         self.imgs = [None] * n
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
-        for i, s in enumerate(sources):  # index, source
-            # Start thread to read frames from video stream
+        for i, s in enumerate(sources):
+            # Start the thread to read frames from the video stream
             print(f'{i + 1}/{n}: {s}... ', end='')
-            if 'youtube.com/' in s or 'youtu.be/' in s:  # if source is YouTube video
+            url = eval(s) if s.isnumeric() else s
+            if 'youtube.com/' in url or 'youtu.be/' in url:  # if source is YouTube video
                 check_requirements(('pafy', 'youtube_dl'))
                 import pafy
-                s = pafy.new(s).getbest(preftype="mp4").url  # YouTube URL
-            s = eval(s) if s.isnumeric() else s  # i.e. s = '0' local webcam
-            cap = cv2.VideoCapture(s)
+                url = pafy.new(url).getbest(preftype="mp4").url
+            cap = cv2.VideoCapture(url)
             assert cap.isOpened(), f'Failed to open {s}'
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -554,7 +485,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         # Check cache
         self.label_files = img2label_paths(self.img_files)  # labels
-        # print(self.label_files)
         cache_path = (p if p.is_file() else Path(self.label_files[0]).parent).with_suffix('.cache')  # cached labels
         if cache_path.is_file():
             cache, exists = torch.load(cache_path), True  # load
@@ -583,7 +513,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 x[:, 0] = 0
 
         n = len(shapes)  # number of images
-        bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
+        bi = np.floor(np.arange(n) / batch_size).astype(int)  # batch index
         nb = bi[-1] + 1  # number of batches
         self.batch = bi  # batch index of image
         self.n = n
@@ -611,7 +541,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 elif mini > 1:
                     shapes[i] = [1, 1 / mini]
 
-            self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
+            self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(int) * stride
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs = [None] * n
@@ -691,27 +621,17 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     #     return self
 
     def __getitem__(self, index):
-
         index = self.indices[index]  # linear, shuffled, or image_weights
+
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
-
         if mosaic:
             # Load mosaic
-
             img, labels = load_mosaic(self, index)
-
-            # FQY 打印图片
-            # print("--------------------------------------Load mosaic")
-            # im = Image.fromarray(img.astype('uint8')).convert('RGB')
-            # Image.Image.save(im, 'example_%s_%s.jpg'%(self.path.split("/")[7], str(index)))
-            # print(' write the example_%s_%s.jpg' %(self.path.split("/")[7], str(index)))
-
             shapes = None
 
             # MixUp https://arxiv.org/pdf/1710.09412.pdf
             if random.random() < hyp['mixup']:
-
                 img2, labels2 = load_mosaic(self, random.randint(0, self.n - 1))
                 r = np.random.beta(8.0, 8.0)  # mixup ratio, alpha=beta=8.0
                 img = (img * r + img2 * (1 - r)).astype(np.uint8)
@@ -753,7 +673,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             labels[:, [2, 4]] /= img.shape[0]  # normalized height 0-1
             labels[:, [1, 3]] /= img.shape[1]  # normalized width 0-1
 
-        random.seed(index)
         if self.augment:
             # flip up-down
             if random.random() < hyp['flipud']:
@@ -789,9 +708,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         img, label, path, shapes = zip(*batch)  # transposed
         n = len(shapes) // 4
         img4, label4, path4, shapes4 = [], [], path[:n], shapes[:n]
-
-        print("n = len(shapes) // 4", n)
-        print("Image Shape", img.shape)
 
         ho = torch.tensor([[0., 0, 0, 1, 0, 0]])
         wo = torch.tensor([[0., 0, 1, 0, 0, 0]])
@@ -955,7 +871,7 @@ class LoadMultiModalImagesAndLabels(Dataset):  # for training/testing
                 x[:, 0] = 0
 
         n_rgb = len(shapes_rgb)  # number of images
-        bi_rgb = np.floor(np.arange(n_rgb) / batch_size).astype(np.int)  # batch index
+        bi_rgb = np.floor(np.arange(n_rgb) / batch_size).astype(int)  # batch index
         nb_rgb = bi_rgb[-1] + 1  # number of batches
         self.batch_rgb = bi_rgb  # batch index of image
         self.n_rgb = n_rgb
@@ -974,7 +890,7 @@ class LoadMultiModalImagesAndLabels(Dataset):  # for training/testing
                 x[:, 0] = 0
 
         n_ir = len(shapes_ir)  # number of images
-        bi_ir = np.floor(np.arange(n_ir) / batch_size).astype(np.int)  # batch index
+        bi_ir = np.floor(np.arange(n_ir) / batch_size).astype(int)  # batch index
         nb_ir = bi_ir[-1] + 1  # number of batches
         self.batch_ir = bi_ir  # batch index of image
         self.n_ir = n_ir
@@ -1005,7 +921,7 @@ class LoadMultiModalImagesAndLabels(Dataset):  # for training/testing
         #         elif mini > 1:
         #             shapes[i] = [1, 1 / mini]
         #
-        #     self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
+        #     self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(int) * stride
 
         # Rectangular Training
         if self.rect:
@@ -1031,7 +947,7 @@ class LoadMultiModalImagesAndLabels(Dataset):  # for training/testing
                 elif mini > 1:
                     shapes_rgb[i] = [1, 1 / mini]
 
-            self.batch_shapes_rgb = np.ceil(np.array(shapes_rgb) * img_size / stride + pad).astype(np.int) * stride
+            self.batch_shapes_rgb = np.ceil(np.array(shapes_rgb) * img_size / stride + pad).astype(int) * stride
 
             # IR
             # Sort by aspect ratio
@@ -1054,7 +970,7 @@ class LoadMultiModalImagesAndLabels(Dataset):  # for training/testing
                 elif mini > 1:
                     shapes_ir[i] = [1, 1 / mini]
 
-            self.batch_shapes_ir = np.ceil(np.array(shapes_ir) * img_size / stride + pad).astype(np.int) * stride
+            self.batch_shapes_ir = np.ceil(np.array(shapes_ir) * img_size / stride + pad).astype(int) * stride
 
         # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
         self.imgs_rgb = [None] * n_rgb
@@ -1316,9 +1232,7 @@ class LoadMultiModalImagesAndLabels(Dataset):  # for training/testing
         return torch.stack(img4, 0), torch.cat(label4, 0), path4, shapes4
 
 
-
 # Ancillary functions --------------------------------------------------------------------------------------------------
-
 def load_image(self, index):
     # loads 1 image from dataset, returns img, original hw, resized hw
     img = self.imgs[index]
@@ -1327,10 +1241,10 @@ def load_image(self, index):
         img = cv2.imread(path)  # BGR
         assert img is not None, 'Image Not Found ' + path
         h0, w0 = img.shape[:2]  # orig hw
-        r = self.img_size / max(h0, w0)  # ratio
-        if r != 1:  # if sizes are not equal
-            img = cv2.resize(img, (int(w0 * r), int(h0 * r)),
-                             interpolation=cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR)
+        r = self.img_size / max(h0, w0)  # resize image to img_size
+        if r != 1:  # always resize down, only resize up if training with augmentation
+            interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
+            img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
         return img, (h0, w0), img.shape[:2]  # img, hw_original, hw_resized
     else:
         return self.imgs[index], self.img_hw0[index], self.img_hw[index]  # img, hw_original, hw_resized
@@ -1372,13 +1286,14 @@ def load_image_rgb_ir(self, index):
         return self.imgs_rgb[index], self.imgs_ir[index], self.img_hw0_rgb[index], self.img_hw_rgb[index]  # img, hw_original, hw_resized
 
 
-
 def augment_hsv(img, hgain=0.5, sgain=0.5, vgain=0.5):
     r = np.random.uniform(-1, 1, 3) * [hgain, sgain, vgain] + 1  # random gains
     hue, sat, val = cv2.split(cv2.cvtColor(img, cv2.COLOR_BGR2HSV))
     dtype = img.dtype  # uint8
 
-    x = np.arange(0, 256, dtype=np.int16)
+    #x = np.arange(0, 256, dtype=np.int16)
+    x = np.arange(0, 256, dtype=r.dtype)
+
     lut_hue = ((x * r[0]) % 180).astype(dtype)
     lut_sat = np.clip(x * r[1], 0, 255).astype(dtype)
     lut_val = np.clip(x * r[2], 0, 255).astype(dtype)
@@ -1400,16 +1315,6 @@ def hist_equalize(img, clahe=True, bgr=False):
 
 def load_mosaic(self, index):
     # loads images in a 4-mosaic
-
-    # print("BATCH")
-    # print("BATCH", self.batch)
-
-    # print("Path", self.path)
-    # print("INDEX", index)
-
-    # seed = global_var.get_value('mosica_random_seed')
-    # seed = index
-    # random.seed(seed)
 
     labels4, segments4 = [], []
     s = self.img_size
@@ -1460,8 +1365,9 @@ def load_mosaic(self, index):
                                        shear=self.hyp['shear'],
                                        perspective=self.hyp['perspective'],
                                        border=self.mosaic_border)  # border to remove
-    # print(labels4)
+
     return img4, labels4
+
 
 def load_mosaic_RGB_IR(self, index1, index2):
 
@@ -1603,7 +1509,6 @@ def load_mosaic_RGB_IR(self, index1, index2):
 
 
     return img4_rgb, labels4_rgb, img4_ir, labels4_ir
-
 
 
 def load_mosaic9(self, index):
@@ -1817,6 +1722,7 @@ def random_perspective(img, targets=(), segments=(), degrees=10, translate=.1, s
         targets[:, 1:5] = new[i]
 
     return img, targets
+
 
 def random_perspective_rgb_ir(img_rgb, img_ir, targets_rgb=(),targets_ir=(), segments_rgb=(), segments_ir=(),
                               degrees=10, translate=.1, scale=.1, shear=10, perspective=0.0, border=(0, 0)):

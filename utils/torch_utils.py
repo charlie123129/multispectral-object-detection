@@ -212,17 +212,17 @@ def model_info(model, verbose=False, img_size=640):
             print('%5g %40s %9s %12g %20s %10.3g %10.3g' %
                   (i, name, p.requires_grad, p.numel(), list(p.shape), p.mean(), p.std()))
 
-    try:  # FLOPS
-        from thop import profile
-        stride = max(int(model.stride.max()), 32) if hasattr(model, 'stride') else 32
-        img = torch.zeros((1, model.yaml.get('ch', 3), stride, stride), device=next(model.parameters()).device)  # input
-        flops = profile(deepcopy(model), inputs=(img,), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
-        img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
-        fs = ', %.1f GFLOPS' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPS
-    except (ImportError, Exception):
-        fs = ''
+    #try:  # FLOPS
+    from thop import profile
+    stride = max(int(model.stride.max()), 640) if hasattr(model, 'stride') else 640
+    img = torch.zeros((1, model.yaml.get('ch', 3), stride, stride), device=next(model.parameters()).device)  # input
+    flops = profile(deepcopy(model), inputs=(img,img), verbose=False)[0] / 1E9 * 2  # stride GFLOPS
+    #img_size = img_size if isinstance(img_size, list) else [img_size, img_size]  # expand if int/float
+    #fs = ', %.1f GFLOPS' % (flops * img_size[0] / stride * img_size[1] / stride)  # 640x640 GFLOPS
+    #except (ImportError, Exception):
+    #    fs = ''
 
-    logger.info(f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients{fs}")
+    logger.info(f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients, {flops} GFLOPS")
 
 
 def load_classifier(name='resnet101', n=2):
@@ -264,6 +264,28 @@ def copy_attr(a, b, include=(), exclude=()):
             continue
         else:
             setattr(a, k, v)
+
+class EarlyStopping:
+    # YOLOv5 simple early stopper
+    def __init__(self, patience=30):
+        self.best_fitness = 0.0  # i.e. mAP
+        self.best_epoch = 0
+        self.patience = patience or float('inf')  # epochs to wait after fitness stops improving to stop
+        self.possible_stop = False  # possible stop may occur next epoch
+
+    def __call__(self, epoch, fitness):
+        if fitness >= self.best_fitness:  # >= 0 to allow for early zero-fitness stage of training
+            self.best_epoch = epoch
+            self.best_fitness = fitness
+        delta = epoch - self.best_epoch  # epochs without improvement
+        self.possible_stop = delta >= (self.patience - 1)  # possible stop may occur next epoch
+        stop = delta >= self.patience  # stop training if patience exceeded
+        if stop:
+            logger.info(f'Stopping training early as no improvement observed in last {self.patience} epochs. '
+                        f'Best results observed at epoch {self.best_epoch}, best model saved as best.pt.\n'
+                        f'To update EarlyStopping(patience={self.patience}) pass a new patience value, '
+                        f'i.e. `python train.py --patience 300` or use `--patience 0` to disable EarlyStopping.')
+        return stop
 
 
 class ModelEMA:
