@@ -4,9 +4,8 @@ import argparse
 import logging
 import sys
 from copy import deepcopy
-from pathlib import Path
 
-sys.path.append(Path(__file__).parent.parent.absolute().__str__())  # to run '$ python *.py' files in subdirectories
+sys.path.append('./')  # to run '$ python *.py' files in subdirectories
 logger = logging.getLogger(__name__)
 
 from models.common import *
@@ -69,14 +68,11 @@ class Model(nn.Module):
         super(Model, self).__init__()
         if isinstance(cfg, dict):
             self.yaml = cfg  # model dict
-
         else:  # is *.yaml
             import yaml  # for torch hub
             self.yaml_file = Path(cfg).name
             with open(cfg) as f:
-                self.yaml = yaml.safe_load(f)  # model dict
-            print("YAML")
-            print(self.yaml)
+                self.yaml = yaml.load(f, Loader=yaml.SafeLoader)  # model dict
 
         # Define model
         ch = self.yaml['ch'] = self.yaml.get('ch', ch)  # input channels
@@ -88,21 +84,18 @@ class Model(nn.Module):
             self.yaml['anchors'] = round(anchors)  # override yaml value
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
-        # logger.info([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
+        # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
         # Build strides, anchors
         m = self.model[-1]  # Detect()
-        # print("Detect")
-        # print(m)
         if isinstance(m, Detect):
             s = 256  # 2x min stride
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
-            # print("m.stride", m.stride)
             m.anchors /= m.stride.view(-1, 1, 1)
             check_anchor_order(m)
             self.stride = m.stride
             self._initialize_biases()  # only run once
-            # logger.info('Strides: %s' % m.stride.tolist())
+            # print('Strides: %s' % m.stride.tolist())
 
         # Init weights, biases
         initialize_weights(self)
@@ -141,15 +134,13 @@ class Model(nn.Module):
                 for _ in range(10):
                     _ = m(x)
                 dt.append((time_synchronized() - t) * 100)
-                if m == self.model[0]:
-                    logger.info(f"{'time (ms)':>10s} {'GFLOPS':>10s} {'params':>10s}  {'module'}")
-                logger.info(f'{dt[-1]:10.2f} {o:10.2f} {m.np:10.0f}  {m.type}')
+                print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
 
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
 
         if profile:
-            logger.info('%.1fms total' % sum(dt))
+            print('%.1fms total' % sum(dt))
         return x
 
     def _initialize_biases(self, cf=None):  # initialize biases into Detect(), cf is class frequency
@@ -166,16 +157,15 @@ class Model(nn.Module):
         m = self.model[-1]  # Detect() module
         for mi in m.m:  # from
             b = mi.bias.detach().view(m.na, -1).T  # conv.bias(255) to (3,85)
-            logger.info(
-                ('%6g Conv2d.bias:' + '%10.3g' * 6) % (mi.weight.shape[1], *b[:5].mean(1).tolist(), b[5:].mean()))
+            print(('%6g Conv2d.bias:' + '%10.3g' * 6) % (mi.weight.shape[1], *b[:5].mean(1).tolist(), b[5:].mean()))
 
     # def _print_weights(self):
     #     for m in self.model.modules():
     #         if type(m) is Bottleneck:
-    #             logger.info('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights
+    #             print('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights
 
     def fuse(self):  # fuse model Conv2d() + BatchNorm2d() layers
-        logger.info('Fusing layers... ')
+        print('Fusing layers... ')
         for m in self.model.modules():
             if type(m) is Conv and hasattr(m, 'bn'):
                 m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
@@ -187,19 +177,19 @@ class Model(nn.Module):
     def nms(self, mode=True):  # add or remove NMS module
         present = type(self.model[-1]) is NMS  # last layer is NMS
         if mode and not present:
-            logger.info('Adding NMS... ')
+            print('Adding NMS... ')
             m = NMS()  # module
             m.f = -1  # from
             m.i = self.model[-1].i + 1  # index
             self.model.add_module(name='%s' % m.i, module=m)  # add
             self.eval()
         elif not mode and present:
-            logger.info('Removing NMS... ')
+            print('Removing NMS... ')
             self.model = self.model[:-1]  # remove
         return self
 
     def autoshape(self):  # add autoShape module
-        logger.info('Adding autoShape... ')
+        print('Adding autoShape... ')
         m = autoShape(self)  # wrap model
         copy_attr(m, self, include=('yaml', 'nc', 'hyp', 'names', 'stride'), exclude=())  # copy attributes
         return m
@@ -236,19 +226,6 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 n = 1
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
-        elif m is Add:
-            # print("ch[f]", f, ch[f[0]])
-            c2 = ch[f[0]]
-            args = [c2]
-        elif m is Add2:
-            c2 = ch[f[0]]
-            args = [c2, args[1]]
-        # elif m is CMAFF:
-        #     c2 = ch[f[0]]
-        #     args = [c2]
-        elif m is GPT:
-            c2 = ch[f[0]]
-            args = [c2]
         elif m is Concat:
             c2 = sum([ch[x] for x in f])
         elif m is Detect:
@@ -286,20 +263,15 @@ if __name__ == '__main__':
 
     # Create model
     model = Model(opt.cfg).to(device)
-    input_rgb = torch.Tensor(8, 3, 640, 640).to(device)
-    output = model(input_rgb)
-
-    # print(model)
-    # model.train()
-    # torch.save(model, "yolov5s.pth")
+    model.train()
 
     # Profile
-    # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 320, 320).to(device)
+    # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
     # y = model(img, profile=True)
 
-    # Tensorboard (not working https://github.com/ultralytics/yolov5/issues/2898)
+    # Tensorboard
     # from torch.utils.tensorboard import SummaryWriter
-    # tb_writer = SummaryWriter('.')
-    # logger.info("Run 'tensorboard --logdir=models' to view tensorboard at http://localhost:6006/")
-    # tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])  # add model graph
+    # tb_writer = SummaryWriter()
+    # print("Run 'tensorboard --logdir=models/runs' to view tensorboard at http://localhost:6006/")
+    # tb_writer.add_graph(model.model, img)  # add model to tensorboard
     # tb_writer.add_image('test', img[0], dataformats='CWH')  # add model to tensorboard

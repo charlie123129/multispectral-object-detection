@@ -19,6 +19,39 @@ from utils.plots import colors, plot_one_box
 from utils.torch_utils import time_synchronized
 
 from torch.nn import init, Sequential
+import warnings
+
+#SHARED
+from.model.shared_gpt import SHARED_GPT
+from.model.shared_gpt_lora import SHARED_GPT_LORA
+
+#gpt add lora or qlora
+#=============================================================
+from.model.lora import GPT_LORA, LoRALayer
+from.model.lora_adjust import GPT_LORA_ADJUST
+
+from.model.qlora import GPT_QLORA
+from.model.qlora_adjust import GPT_QLORA_ADJUST
+#=============================================================
+
+#特徵提取 C3 換 Swin Transformer
+#=============================================================
+from.model.SwinTransformer import SWIN
+from.model.SwinTransformerLora import SWINLORA
+from.model.swinv2 import C3SV2TR
+from.model.swin import C3STR
+from.model.swinlora import C3SLORA
+#=============================================================
+
+from.model.slimneck import GSConv,GSBottleneck,VoVGSCSP
+#=============================================================
+
+from.model.loragpt import GPT_LORA_
+
+#unet add into conv
+from.model.unet import ConvUNet
+
+from.model.convlora import C3lora, LoRAConv,LoRAConv2d
 
 
 def autopad(k, p=None):  # kernel, padding
@@ -28,9 +61,9 @@ def autopad(k, p=None):  # kernel, padding
     return p
 
 
-def DWConv(c1, c2, k=1, s=1, act=True):
-    # Depthwise convolution
-    return Conv(c1, c2, k, s, g=math.gcd(c1, c2), act=act)
+#def DWConv(c1, c2, k=1, s=1, act=True):
+#    # Depthwise convolution
+#    return Conv(c1, c2, k, s, g=math.gcd(c1, c2), act=act)
 
 
 class Conv(nn.Module):
@@ -50,6 +83,12 @@ class Conv(nn.Module):
         return self.act(self.conv(x))
 
 
+class DWConv(Conv):
+    # Depth-wise convolution class
+    def __init__(self, c1, c2, k=1, s=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
+        super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), act=act)
+
+  
 class TransformerLayer(nn.Module):
     # Transformer layer https://arxiv.org/abs/2010.11929 (LayerNorm layers removed for better performance)
     def __init__(self, c, num_heads):
@@ -151,6 +190,62 @@ class C3TR(C3):
         self.m = TransformerBlock(c_, c_, 4, n)
 
 
+class C2F_Bottleneck(nn.Module):
+    """Standard bottleneck."""
+ 
+    def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5):  # ch_in, ch_out, shortcut, groups, kernels, expand
+        super().__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, k[0], 1)
+        self.cv2 = Conv(c_, c2, k[1], 1, g=g)
+        self.add = shortcut and c1 == c2
+ 
+    def forward(self, x):
+        """'forward()' applies the YOLOv5 FPN to input data."""
+        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+ 
+ 
+class C2f(nn.Module):
+    """CSP Bottleneck with 2 convolutions."""
+ 
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+        super().__init__()
+        self.c = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
+        self.m = nn.ModuleList(C2F_Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+ 
+    def forward(self, x):
+        """Forward pass of a YOLOv5 CSPDarknet backbone layer."""
+        y = list(self.cv1(x).chunk(2, 1))
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
+ 
+    def forward_split(self, x):
+        """Applies spatial attention to module's input."""
+        y = list(self.cv1(x).split((self.c, self.c), 1))
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
+ 
+
+class SPPF(nn.Module):
+    # Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher
+    def __init__(self, c1, c2, k=5):  # equivalent to SPP(k=(5, 9, 13))
+        super().__init__()
+        c_ = c1 // 2  # hidden channels
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c_ * 4, c2, 1, 1)
+        self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
+
+    def forward(self, x):
+        x = self.cv1(x)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # suppress torch 1.9.0 max_pool2d() warning
+            y1 = self.m(x)
+            y2 = self.m(y1)
+            return self.cv2(torch.cat((x, y1, y2, self.m(y2)), 1))      
+
+
 class SPP(nn.Module):
     # Spatial pyramid pooling layer used in YOLOv3-SPP
     def __init__(self, c1, c2, k=(5, 9, 13)):
@@ -241,7 +336,6 @@ class Add2(nn.Module):
         elif self.index == 1:
             return torch.add(x[0], x[1][1])
         # return torch.add(x[0], x[1])
-
 
 
 class NMS(nn.Module):
@@ -427,12 +521,55 @@ class Classify(nn.Module):
         return self.flat(self.conv(z))  # flatten to x(b,c2)
 
 
+class CARAFE(nn.Module):     
+    #CARAFE: Content-Aware ReAssembly of FEatures       https://arxiv.org/pdf/1905.02188.pdf
+    def __init__(self, c1, c2, kernel_size=3, up_factor=2):
+        super(CARAFE, self).__init__()
+        self.kernel_size = kernel_size
+        self.up_factor = up_factor
+        self.down = nn.Conv2d(c1, c1 // 4, 1)
+        self.encoder = nn.Conv2d(c1 // 4, self.up_factor ** 2 * self.kernel_size ** 2,
+                                 self.kernel_size, 1, self.kernel_size // 2)
+        self.out = nn.Conv2d(c1, c2, 1)
+
+    def forward(self, x):
+        N, C, H, W = x.size()
+        # N,C,H,W -> N,C,delta*H,delta*W
+        # kernel prediction module
+        kernel_tensor = self.down(x)  # (N, Cm, H, W)
+        kernel_tensor = self.encoder(kernel_tensor)  # (N, S^2 * Kup^2, H, W)
+        kernel_tensor = F.pixel_shuffle(kernel_tensor, self.up_factor)  # (N, S^2 * Kup^2, H, W)->(N, Kup^2, S*H, S*W)
+        kernel_tensor = F.softmax(kernel_tensor, dim=1)  # (N, Kup^2, S*H, S*W)
+        kernel_tensor = kernel_tensor.unfold(2, self.up_factor, step=self.up_factor) # (N, Kup^2, H, W*S, S)
+        kernel_tensor = kernel_tensor.unfold(3, self.up_factor, step=self.up_factor) # (N, Kup^2, H, W, S, S)
+        kernel_tensor = kernel_tensor.reshape(N, self.kernel_size ** 2, H, W, self.up_factor ** 2) # (N, Kup^2, H, W, S^2)
+        kernel_tensor = kernel_tensor.permute(0, 2, 3, 1, 4)  # (N, H, W, Kup^2, S^2)
+
+        # content-aware reassembly module
+        # tensor.unfold: dim, size, step
+        x = F.pad(x, pad=(self.kernel_size // 2, self.kernel_size // 2,
+                                          self.kernel_size // 2, self.kernel_size // 2),
+                          mode='constant', value=0) # (N, C, H+Kup//2+Kup//2, W+Kup//2+Kup//2)
+        x = x.unfold(2, self.kernel_size, step=1) # (N, C, H, W+Kup//2+Kup//2, Kup)
+        x = x.unfold(3, self.kernel_size, step=1) # (N, C, H, W, Kup, Kup)
+        x = x.reshape(N, C, H, W, -1) # (N, C, H, W, Kup^2)
+        x = x.permute(0, 2, 3, 1, 4)  # (N, H, W, C, Kup^2)
+
+        out_tensor = torch.matmul(x, kernel_tensor)  # (N, H, W, C, S^2)
+        out_tensor = out_tensor.reshape(N, H, W, -1)
+        out_tensor = out_tensor.permute(0, 3, 1, 2)
+        out_tensor = F.pixel_shuffle(out_tensor, self.up_factor)
+        out_tensor = self.out(out_tensor)
+        #print("up shape:",out_tensor.shape)
+        return out_tensor
+
+
 class SelfAttention(nn.Module):
     """
      Multi-head masked self-attention layer
     """
 
-    def __init__(self, d_model, d_k, d_v, h, attn_pdrop=.1, resid_pdrop=.1):
+    def __init__(self, d_model, d_k, d_v, h, attn_pdrop=0.2, resid_pdrop=0.2):
         '''
         :param d_model: Output dimensionality of the model
         :param d_k: Dimensionality of queries and keys
@@ -551,15 +688,15 @@ class GPT(nn.Module):
 
     def __init__(self, d_model, h=8, block_exp=4,
                  n_layer=8, vert_anchors=8, horz_anchors=8,
-                 embd_pdrop=0.1, attn_pdrop=0.1, resid_pdrop=0.1):
+                 embd_pdrop=0.2, attn_pdrop=0.2, resid_pdrop=0.2):
         super().__init__()
 
         self.n_embd = d_model
         self.vert_anchors = vert_anchors
         self.horz_anchors = horz_anchors
 
-        d_k = d_model
-        d_v = d_model
+        d_k = d_model//h
+        d_v = d_model//h
 
         # positional embedding parameter (learnable), rgb_fea + ir_fea
         self.pos_emb = nn.Parameter(torch.zeros(1, 2 * vert_anchors * horz_anchors, self.n_embd))
