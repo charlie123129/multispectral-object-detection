@@ -23,8 +23,8 @@ pip install -r requirements.txt
 ```
 
 ### 下載 multispectral
->### 把multispectrale資料夾內的資料複製到yolov5資料夾
+>### 把multispectral資料夾內的資料複製到yolov5資料夾
 ```
-git clone https://github.com/charlie123129/edge_ai_yolov5_distance
+git clone https://github.com/charlie123129/multispectral
 ```
 
