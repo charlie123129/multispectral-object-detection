@@ -25,6 +25,6 @@ pip install -r requirements.txt
 ### 下載 multispectral
 >### 把multispectral資料夾內的資料複製到yolov5資料夾
 ```
-git clone https://github.com/charlie123129/multispectral
+git clone https://github.com/charlie123129/multispectral-object-detection
 ```
 
